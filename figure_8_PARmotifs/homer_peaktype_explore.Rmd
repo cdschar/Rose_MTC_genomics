@@ -1,0 +1,376 @@
+---
+title: "home_peaktype_explore"
+author: "Jrose"
+date: "2/19/2021"
+output: html_document
+---
+
+Here I am looking to repeat much of the work done with the rank analysis of homer but with a new set of homer enrichments using bed files specific to peaks of a certain category (i.e. primed, induced, conserved, etc).
+
+Much of this is just a copy of the homer_rankplot.R script code
+
+```{r}
+library(tidyverse)
+library(here)
+library(ComplexHeatmap)
+library(circlize)
+
+#input_dir <- c('Homer/labfilter/cluster_1', 'Homer/labfilter/cluster_2')
+input_dir <- c('CD4_EM_consv', 'CD4_EM_induce', 'CD4_EM_mem','CD4_EM_prime', 'CD4_EM_nav')
+category <- basename(input_dir)
+output_dir <- "output"
+subset <- "stim_state"
+
+colnames_homer <- c("Motif.Name" ,
+              "Consensus",
+              "P.value",
+              "Log.P.value",
+              "q.value",
+              "Number.of.Target.Sequences.with.Motif",
+              "Percent.of.Target.Sequences.with.Motif",
+              "Number.of.Background.Sequences.with.Motif",
+              "Percent.of.Background.Sequences.with.Motif"
+              )
+
+data <- list()
+
+for (i in 1:length(input_dir)){
+  data[[i]] <- read.delim(file=here(input_dir[i], 'knownResults.txt'), header=T, row.names=NULL, col.names=colnames_homer)
+  
+  data[[i]]$Percent.of.Target.Sequences.with.Motif <- gsub("%","",data[[i]]$Percent.of.Target.Sequences.with.Motif) %>% as.numeric()
+  data[[i]]$Percent.of.Background.Sequences.with.Motif <- gsub("%","",data[[i]]$Percent.of.Background.Sequences.with.Motif) %>% as.numeric()
+  #^Need to clean up percentages which are loading in as factors with an extra "%" in there
+
+  data[[i]]$cluster <- category[i]
+  #^Adding in identity column
+  
+  data[[i]]$rank <- rank(data[[i]]$P.value)
+  data[[i]]$rnk_score <- length(data[[i]]$P.value)/rank(data[[i]]$P.value)
+  #^Calculating rank score by normalizing p-values by the total length
+  #Because I want a positive value I'm using the inverse here
+}
+
+names(data) <- category
+str(data)
+```
+
+```{r}
+#Combining all dataframes by shared Motif.Name
+data_all <- Reduce(
+  function(x, y, ...) merge(x, y, all = TRUE, ...),
+  data
+)
+
+data_all <- mutate(data_all, negLog.P.value=-Log.P.value, 
+                   per_diff=Percent.of.Target.Sequences.with.Motif-Percent.of.Background.Sequences.with.Motif,
+                   per_ratio=Percent.of.Target.Sequences.with.Motif/Percent.of.Background.Sequences.with.Motif) %>% 
+  arrange(Log.P.value) %>%
+  separate(col=Motif.Name, into=c("TF", "dataset", "tool"), sep="/", remove=F)
+
+data_all$TF <- gsub("Tcf3\\(HMG\\)", "Tcf3(bHLH)", data_all$TF)
+#^Need to fix TF family of TCF3
+
+data_all <- separate(data_all, col=TF, into=c("TF2", "TF_family"), sep="\\(", remove=F)
+data_all$TF_family <- gsub(")", "", data_all$TF_family)
+
+head(data_all)
+```
+
+### Rank-change heatmaps
+
+Stuff for making heatmap of rank scores
+
+```{r}
+#By rank
+
+dups <- data_all %>% count(TF) %>% subset(n>length(category))
+data_nodups <- data_all[!data_all$TF%in%dups$TF,]
+#^Removing motifs with multiple consensus sequences
+
+data_rank <- data_nodups %>% group_by(TF, cluster) %>% 
+  summarise(rnk_score=rnk_score) %>%
+  pivot_wider(names_from=cluster, values_from=rnk_score)
+
+#Highest variance of rank score
+# data_rank2 <- data_rank
+# data_rank2$rank_sd <- apply(data_rank[,-1], c(1), sd)
+data_rank2 <- data_nodups %>% group_by(TF, cluster) %>% 
+  summarise(rank=rank) %>%
+  pivot_wider(names_from=cluster, values_from=rank)
+
+########################################################################################
+#Creating matrix for heatmap
+
+mtx_rank <- as.matrix(data_rank[,-1])
+rownames(mtx_rank) <- data_rank$TF
+
+cutoff <- apply(mtx_rank, c(1), function(x) any(x>5))
+mtx_rank2 <- mtx_rank[cutoff,]
+
+mtx_rank3 <- t(apply(mtx_rank2, c(1), scale))
+mtx_rank3 <- drop_na(data.frame(mtx_rank3))
+colnames(mtx_rank3) <- colnames(mtx_rank2)
+
+highlight = c("BATF(bZIP)", "IRF4(IRF)", "Ets1-distal(ETS)", "bZIP:IRF(bZIP,IRF)", "Ap4(bHLH)", "RUNX2(Runt)", "RUNX1(Runt)", "Tbet(T-box)", "Nrf1(bZIP)", "IRF8(IRF)", "RORg(NR)", "IRF3(IRF)",
+              "NFAT:AP1(RHD,bZIP)", "NFkB-p50,p52(RHD)","CTCF(Zf)", "JunB(bZIP)", "LEF1(HMG)", "Tcf7(HMG)",
+              "GATA(Zf),IR4", "RUNX(Runt)", "PRDM1(Zf)", "Stat3(Stat)", "STAT5(Stat)", "Bach2(bZIP)", "STAT4(Stat)",
+              "PU.1-IRF(ETS:IRF)","Gata1(Zf)", "Foxo3(Forkhead)", "Fra2(bZIP)", "Fra1(bZIP)",
+              "bZIP:IRF(bZIP,IRF)", "IRF:BATF(IRF:bZIP)", "Tcf3(bHLH)","Fli1(ETS)", "AP-1(bZIP)", "NFkB−p65−Rel(RHD)", "Eomes(T-box)","Gata2(Zf)", "Ascl2(bHLH)", "E2F1(E2F)", "E2F3(E2F)", "FOXP1(Forkhead)", "GABPA(ETS)")
+highlight2 = gsub("\\(", "\\\\(", highlight)
+#^List of factor motifs to highlight
+
+lbl_index <- vector()
+for (i in 1:length(highlight)){
+  if (highlight[i]%in%rownames(mtx_rank3)) {
+    lbl_index[i] <- grep(highlight2[i], rownames(mtx_rank3))
+  }
+}
+
+
+colnames(mtx_rank2) <- colnames(mtx_rank3)
+head(mtx_rank2)
+```
+
+Actual heatmap plotting
+
+```{r}
+theme_set(theme_bw()+ 
+          theme(panel.grid.minor = element_blank(), 
+                axis.text.x = element_text(size=14,angle=90)
+                )
+          )
+
+col= colorRamp2(c(-2, 0, 2), c("tan4", "white", "deepskyblue3"), space = "sRGB")
+col2= colorRamp2(c(0, 80), c("light yellow", "firebrick"), space = "sRGB")
+name="Relative Rank Change (z-scored)"
+name2="Rank Score"
+
+pdf(file=here(output_dir, paste0(subset,'_CD4_EM_rankheat.pdf')), height=7, width=8)
+Heatmap(mtx_rank3,
+        #show_row_names = F,
+        row_names_gp = gpar(fontsize = 3),
+        col=col,
+        name=name
+        #right_annotation = rowAnnotation(gene = anno_mark(at = lbl_index, 
+        #                                                  labels = highlight,
+        #                                                  labels_gp = gpar(fontsize=10)))
+        )
+dev.off()
+
+pdf(file=here(output_dir, paste0(subset,'_CD4_EM_rankheat_noZ.pdf')), height=7, width=8)
+Heatmap(mtx_rank2,
+        #show_row_names = F,
+        row_names_gp = gpar(fontsize = 3),
+        col=col2,
+        name=name2
+        #right_annotation = rowAnnotation(gene = anno_mark(at = lbl_index, 
+        #                                                  labels = highlight,
+        #                                                  labels_gp = gpar(fontsize=10)))
+        )
+dev.off()
+
+# pdf(file=here(output_dir, paste0(subset,'_CD4_EM_rankheathighlight.pdf')), height=7, width=8)
+# Heatmap(mtx_rank3,
+#         show_row_names = F,
+#         #row_names_gp = gpar(fontsize = 4),
+#         #right_annotation = rowAnnotation(gene = anno_mark(at = lbl_index,
+#         #                                                  labels = highlight,
+#         #                                                  labels_gp = gpar(fontsize=10))),
+#         col=col,
+#         name=name
+# )
+# dev.off()
+
+mtx_rank2_sub <- mtx_rank2[rownames(mtx_rank2)%in%highlight,]
+mtx_rank3_sub <- mtx_rank3[rownames(mtx_rank3)%in%rownames(mtx_rank2_sub),]
+
+Heatmap(mtx_rank2_sub,
+        #show_row_names = F,
+        row_names_gp = gpar(fontsize = 6),
+        heatmap_legend_param = list(title_gp=gpar(fontsize=5, fontface="bold"),
+                                    labels_gp = gpar(fontsize = 4)),
+        #right_annotation = rowAnnotation(gene = anno_mark(at = lbl_index, 
+        #                                                  labels = highlight,
+        #                                                  labels_gp = gpar(fontsize=10))),
+        col=col2,
+        name=name2
+)
+
+pdf(file=here(output_dir, paste0(subset,'_CD4_EM_rankheatsmall.pdf')), height=6, width=4)
+Heatmap(mtx_rank3_sub,
+        #show_row_names = F,
+        row_names_gp = gpar(fontsize = 6),
+        heatmap_legend_param = list(title_gp=gpar(fontsize=5, fontface="bold"),
+                                    labels_gp = gpar(fontsize = 4)),
+        #right_annotation = rowAnnotation(gene = anno_mark(at = lbl_index, 
+        #                                                  labels = highlight,
+        #                                                  labels_gp = gpar(fontsize=10))),
+        col=col,
+        name=name
+)
+dev.off()
+```
+
+```{r}
+rowMax <- apply(mtx_rank2, c(1), max)
+summary(rowMax)
+mtx_rank2_sub2 <- mtx_rank2[which(rowMax>7.5),]
+#^Using 1st quartile as cutoff
+mtx_rank3_sub2 <- mtx_rank3[rownames(mtx_rank3)%in%rownames(mtx_rank2_sub2),]
+
+col2= colorRamp2(c(0, 80), c("light yellow", "firebrick"), space = "sRGB")
+
+Heatmap(mtx_rank2_sub2,
+        #show_row_names = F,
+        row_names_gp = gpar(fontsize = 6),
+        heatmap_legend_param = list(title_gp=gpar(fontsize=5, fontface="bold"),
+                                    labels_gp = gpar(fontsize = 4)),
+        #right_annotation = rowAnnotation(gene = anno_mark(at = lbl_index, 
+        #                                                  labels = highlight,
+        #                                                  labels_gp = gpar(fontsize=10))),
+        col=col2,
+        name=name2
+)
+
+Heatmap(mtx_rank3_sub2,
+        #show_row_names = F,
+        row_names_gp = gpar(fontsize = 6),
+        heatmap_legend_param = list(title_gp=gpar(fontsize=5, fontface="bold"),
+                                    labels_gp = gpar(fontsize = 4)),
+        #right_annotation = rowAnnotation(gene = anno_mark(at = lbl_index, 
+        #                                                  labels = highlight,
+        #                                                  labels_gp = gpar(fontsize=10))),
+        col=col,
+        name=name
+)
+```
+
+### Scatter Plots
+
+Let's try another way of visualizing rank differences
+
+```{r}
+library(ggrepel)
+
+diff_cut <- 50
+max <- 200
+
+data_tidyrank <- data_nodups %>% subset(rank<=max) %>%group_by(TF, cluster) %>% summarise(rank=rank, TF_family=TF_family) %>% pivot_wider(names_from="cluster", values_from=c("rank"))
+head(data_tidyrank)
+ggplot(data_tidyrank, aes(x=CD4_EM_consv, y=CD4_EM_prime)) + geom_point(aes(color=TF_family)) + geom_abline(slope=1, intercept = 0, linetype="dashed") + scale_y_continuous(trans="reverse", limits=c(max,1)) +  scale_x_continuous(trans="reverse",limits=c(max,1)) #+ geom_text(aes(label=ifelse(abs(CD4_EM_consv-CD4_EM_prime)>diff_cut, as.character(TF),"")), size=3) 
+ggsave(here(output_dir, "CD4_EMrank_scater_prime_consv.pdf"), width=10, height=5)
+
+ggplot(data_tidyrank, aes(x=CD4_EM_induce, y=CD4_EM_prime)) + geom_point(aes(color=TF_family)) + geom_abline(slop=1, intercept = 0, linetype="dashed") + geom_text_repel(aes(label=ifelse(abs(CD4_EM_induce-CD4_EM_prime)>diff_cut, as.character(TF),"")), size=3) + scale_y_continuous(trans="reverse",limits=c(max,1)) +  scale_x_continuous(trans="reverse",limits=c(max,1))
+ggsave(here(output_dir, "CD4_EMrank_scater_prime_induce.pdf"), width=10, height=5)
+
+ggplot(data_tidyrank, aes(x=CD4_EM_mem, y=CD4_EM_prime)) + geom_point(aes(color=TF_family)) + geom_abline(slop=1, intercept = 0, linetype="dashed") + geom_text_repel(aes(label=ifelse(abs(CD4_EM_mem-CD4_EM_prime)>diff_cut, as.character(TF),"")), size=3) + scale_y_continuous(trans="reverse",limits=c(max,1)) +  scale_x_continuous(trans="reverse",limits=c(max,1))
+ggsave(here(output_dir, "CD4_EMrank_scater_prime_mem.pdf"), width=10, height=5)
+
+
+ggplot(data_tidyrank, aes(x=CD4_EM_mem, y=CD4_EM_consv)) + geom_point(aes(color=TF_family)) + geom_abline(slop=1, intercept = 0, linetype="dashed") + geom_text_repel(aes(label=ifelse(abs(CD4_EM_mem-CD4_EM_consv)>diff_cut, as.character(TF),"")), size=3) + scale_y_continuous(trans="reverse",limits=c(max,1)) +  scale_x_continuous(trans="reverse",limits=c(max,1))
+ggsave(here(output_dir, "CD4_EMrank_scater_consv_mem.pdf"), width=10, height=5)
+
+class(data_tidyrank$CD4_EM_prime)
+```
+
+```{r}
+newdat <- data_nodups %>% group_by(TF, cluster) %>% summarise(ave_per_target = mean(Percent.of.Target.Sequences.with.Motif), ave_per_background =mean(Percent.of.Background.Sequences.with.Motif), ave_per_diff = mean(per_diff), P.value=mean(P.value), ave_Npeaks=mean(Number.of.Target.Sequences.with.Motif), n=n())
+
+newdat <- newdat[newdat$TF%in%highlight,]
+
+newdat$cluster <- factor(newdat$cluster)
+newdat$cluster <- recode(newdat$cluster, both="Augmented", poised="Induced", rest = "Expressed")
+newdat <- subset(newdat, cluster!="stim")
+
+tar_back <- select(newdat, TF, cluster, ave_per_target, ave_per_background) %>% pivot_wider(names_from="cluster", values_from=c("ave_per_target", "ave_per_background")) %>% select(-starts_with("ave_per_background"))
+
+head(tar_back)
+mtx <- as.matrix(tar_back[,-1])
+rownames(mtx) <- tar_back$TF
+mtx_scale <- t(apply(mtx, c(1), scale))
+rownames(mtx_scale) <- tar_back$TF
+colnames(mtx_scale) <- colnames(mtx)
+```
+
+```{r}
+library(ComplexHeatmap)
+library(circlize)
+
+col3 = colorRamp2(c(0,50), c("white","firebrick"), space = "sRGB")
+
+Heatmap(mtx_scale, cluster_rows = T, cluster_columns = T)
+
+pdf(file=here(output_dir, paste0(subset,'_CD4_EM_homerperheat.pdf')), height=6, width=4)
+Heatmap(mtx, cluster_rows = T, cluster_columns = T, col=col3,
+         row_names_gp = gpar(fontsize = 6)
+        )
+dev.off()
+```
+
+### Combined heatmaps
+
+```{r}
+mtx_per_sub <- mtx[rownames(mtx)%in%rownames(mtx_rank3_sub),]
+colnames(mtx_per_sub) <- gsub("ave_per_target_", "", colnames(mtx_per_sub))
+mtx_per_sub <- mtx_per_sub[,order(match(colnames(mtx_rank3_sub),colnames(mtx_per_sub)))]
+
+rankheat<-Heatmap(mtx_rank3_sub,
+        #show_row_names = F,
+        row_names_gp = gpar(fontsize = 7),
+        heatmap_legend_param = list(title_gp=gpar(fontsize=6, fontface="bold"),
+                                    labels_gp = gpar(fontsize = 5)),
+        #right_annotation = rowAnnotation(gene = anno_mark(at = lbl_index, 
+        #                                                  labels = highlight,
+        #                                                  labels_gp = gpar(fontsize=10))),
+        col=col,
+        row_split = 6,
+        row_title = c("Mem", "Naive", "Prime/Ind", "Prime/Mem", "Consv", "Induced"),
+        row_title_rot = 0,
+        name="Relative Enrichment Rank"
+)
+rankheat
+
+mtx_per_sub_ordered <- mtx_per_sub[,column_order(rankheat)]
+
+perheat <- Heatmap(mtx_per_sub_ordered, cluster_rows = T, cluster_columns = F, col=col3,      row_names_gp = gpar(fontsize = 7),
+        heatmap_legend_param = list(title_gp=gpar(fontsize=6, fontface="bold"),
+                                    labels_gp = gpar(fontsize = 5)),
+        name="% Target w/ Motif"
+        )
+pdf(file=here(output_dir, paste0(subset,'_CD4_EM_combinerankperheat.pdf')), height=8, width=6)
+rankheat+perheat
+dev.off()
+```
+
+### Let's look at barplots of ave target and background by peak category
+
+```{r}
+library(ggpubr)
+
+pertidy <- data_nodups %>% group_by(TF_family, cluster) %>% summarise(ave_target = mean(Percent.of.Target.Sequences.with.Motif), ave_background = mean(Percent.of.Background.Sequences.with.Motif)) %>% pivot_longer(cols=starts_with("ave_"), names_to="Peaktype", values_to="Percent")
+
+pertidy$cluster <- factor(pertidy$cluster, levels=c("CD4_EM_induce","CD4_EM_prime", "CD4_EM_mem", "CD4_EM_consv", "CD4_EM_nav"), ordered = T)
+
+color_two <- c("ave_target"="Firebrick", "ave_background"="dodgerblue4")
+
+bzip <- ggplot(subset(pertidy, TF_family=="bZIP"), aes(x=cluster, y=Percent)) + geom_bar(stat="identity", position="dodge", aes(fill=Peaktype)) + scale_fill_manual(values=color_two) + ggtitle("bZIP Family Motifs")
+
+tbox <- ggplot(subset(pertidy, TF_family=="T-box"), aes(x=cluster, y=Percent)) + geom_bar(stat="identity", position="dodge", aes(fill=Peaktype)) + scale_fill_manual(values=color_two) + ggtitle("T-box Family Motifs")
+
+hmg <- ggplot(subset(pertidy, TF_family=="HMG"), aes(x=cluster, y=Percent)) + geom_bar(stat="identity", position="dodge", aes(fill=Peaktype)) + scale_fill_manual(values=color_two) + ggtitle("HMG Family Motifs")
+
+irf <- ggplot(subset(pertidy, TF_family=="IRF"), aes(x=cluster, y=Percent)) + geom_bar(stat="identity", position="dodge", aes(fill=Peaktype)) + scale_fill_manual(values=color_two) + ggtitle("IRF Family Motifs")
+
+ets <- ggplot(subset(pertidy, TF_family=="ETS"), aes(x=cluster, y=Percent)) + geom_bar(stat="identity", position="dodge", aes(fill=Peaktype)) + scale_fill_manual(values=color_two) + ggtitle("ETS Family Motifs")
+
+rhd <- ggplot(subset(pertidy, TF_family=="RHD"), aes(x=cluster, y=Percent)) + geom_bar(stat="identity", position="dodge", aes(fill=Peaktype)) + scale_fill_manual(values=color_two) + ggtitle("RHD Family Motifs")
+
+runx <- ggplot(subset(pertidy, TF_family=="Runt"), aes(x=cluster, y=Percent)) + geom_bar(stat="identity", position="dodge", aes(fill=Peaktype)) + scale_fill_manual(values=color_two) + ggtitle("RUNX/Runt Family Motifs")
+
+bhlh <- ggplot(subset(pertidy, TF_family=="bHLH"), aes(x=cluster, y=Percent)) + geom_bar(stat="identity", position="dodge", aes(fill=Peaktype)) + scale_fill_manual(values=color_two) + ggtitle("bHLH Family Motifs")
+
+stat <- ggplot(subset(pertidy, TF_family=="Stat"), aes(x=cluster, y=Percent)) + geom_bar(stat="identity", position="dodge", aes(fill=Peaktype)) + scale_fill_manual(values=color_two) + ggtitle("Stat Family Motifs")
+
+ggarrange(bzip, tbox, hmg, irf, ets, rhd, runx, bhlh, stat, common.legend = T)
+```
+

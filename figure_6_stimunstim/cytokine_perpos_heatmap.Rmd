@@ -1,0 +1,67 @@
+---
+title: "Cytokine_Per_positive_heatmap"
+author: "Jrose"
+date: '2022-10-06'
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(ComplexHeatmap)
+library(som)
+library(RColorBrewer)
+library(circlize)
+
+home_dir <- "~/Dropbox/PhD/Tmem/figures/fig6/"
+
+data <- read_csv(paste0(home_dir, "cytokine_perpos.csv"))
+```
+
+```{r}
+data_mtx <- data %>% column_to_rownames(var="Cytokine") %>% as.matrix()
+data_mtx
+
+data_mtx_z <- apply(data_mtx, c(1), som::normalize) %>% t()
+colnames(data_mtx_z) <- colnames(data_mtx)
+```
+
+```{r}
+Heatmap(data_mtx_z,
+        cluster_columns = F)
+Heatmap(data_mtx_z,
+        cluster_columns = T)
+Heatmap(data_mtx,
+        cluster_columns = F)
+Heatmap(log(data_mtx+1, base=2),
+        cluster_columns = F)
+```
+
+
+Getting color pallette
+
+```{r}
+brewer.pal(6, "PRGn")
+
+col_fun = colorRamp2(c(-2, 0, 2), c("midnightblue", "white", "lightsalmon2"))
+
+col_fun2 = colorRamp2(c(0, 3, 6), c("white", "slateblue1", "slateblue4"))
+```
+
+Final heatmap
+
+```{r}
+pdf(file=paste0(home_dir, "cytokine_perpos_heat.pdf"), height=5, width=3.5)
+Heatmap(data_mtx_z,
+        cluster_columns = F,
+        col=col_fun,
+        name="% Pos")
+dev.off()
+
+pdf(file=paste0(home_dir, "cytokine_perpos_logheat.pdf"), height=5, width=3.5)
+Heatmap(log(data_mtx+1, base=2),
+        cluster_columns = F,
+        col=col_fun2,
+        name="% Pos (log2)")
+dev.off()
+```
+
