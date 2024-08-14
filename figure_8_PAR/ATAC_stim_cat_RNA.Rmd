@@ -227,6 +227,11 @@ ggbarplot(reform_df, x = "peaktype", y = "Percent",
 ggsave(filename = here(output_dir, "CD4_peaktype_by_expression_bar_flip.pdf"), height=4, width=8)
 ```
 
+```{r}
+write.xlsx(reform_df, '~/Dropbox/PhD/Tmem/data/exports/8g.xlsx')
+```
+
+
 What about where these types of peaks are located in each with the trimmed.
 
 ```{r}
@@ -727,6 +732,16 @@ ggMarginal(p, groupColour = T, groupFill = T)
 ggsave(here(output_dir, "CD4_EM_primed_peak_expression_nologFCcut.pdf"), height=4.5, width=5)
 ```
 
+```{r}
+#Data export
+library(openxlsx)
+
+export <- RNA_sub2 %>% select(CD4_EM_blood_unstim.v.CD4_Nav_blood_unstim.logFC, CD4_EM_blood_stim.v.CD4_Nav_blood_stim.logFC, PrimeState, IndState)
+
+write.xlsx(export, '~/Dropbox/PhD/Tmem/data/exports/8de.xlsx')
+```
+
+
 Interesting! When you filter for logFC>1 and FDR significant there is a definite skewing towards the positive direction in both unstim and stim states! Need to back it up with statisitcs though.
 
 How does this compare with other peak types?
@@ -1212,6 +1227,10 @@ CD4_per_prime <- data.frame(all=all, prime=prime, percent=test, cat=names(test))
 ggplot(CD4_per_prime, aes(x=cat, y=percent)) + geom_col(aes(fill=cat)) +
   scale_fill_manual(name="DEG Category", values=c("None"="grey", "Mem_induced_dn"="light blue", "Mem_induced_up"="orange", "Mem_Aug_dn_dn"="violet","Mem_Aug_up_up"="purple", "Mem_Aug_dn_up"="purple","Mem_Aug_up_dn"="purple","Mem_expressed_dn"="cornflower blue", "Mem_expressed_up"="firebrick")) + theme_classic() + theme(axis.text.x=element_blank()) + ylab("Percent Genes with Primed ATAC Peak") + xlab("DEG Expression Category") 
 ggsave(filename=here(output_dir, "CD4_Expression_Primed_barplot.pdf"), width=4.5, height=4)
+```
+
+```{r}
+write.xlsx(CD4_per_prime, '~/Dropbox/PhD/Tmem/data/exports/8f.xlsx')
 ```
 
 So it looks like nearly 80% of the upregulated augmented category genes have a primed peak in cis. It's closer to 50% for the other two categories.

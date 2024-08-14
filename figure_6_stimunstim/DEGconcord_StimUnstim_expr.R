@@ -251,6 +251,12 @@ sig_counts$Resting_dn <- -sig_counts$Resting_dn
 sig_counts$Both_dn_dn <- -sig_counts$Both_dn_dn
 sig_counts$subset <- c("CD4_CM", "CD4_EM", "CD8_CM", "CD8_EM", "CD8_EMRA")
 
+#Data export
+library(openxlsx)
+
+write.xlsx(sig_counts, '~/Dropbox/PhD/Tmem/data/exports/DEGcatbar_7g.xlsx')
+
+
 sig_counts_long <- pivot_longer(sig_counts, !subset, names_to="DEG_state_dir", values_to="count") %>% 
   replace_na(list(count=0)) %>%
   mutate(DEG_state = case_when(

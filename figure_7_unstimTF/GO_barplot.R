@@ -128,3 +128,9 @@ ggplot(data_4, aes(x=category,y=ave_neglog10FDR)) + geom_col(aes(fill=number)) +
         axis.title.y=element_blank()
         )
 ggsave(here(output_dir, paste0(subset,"_GO_barplot_overlaps.pdf")), height=5, width=7)
+
+
+#Data export
+library(openxlsx)
+
+write.xlsx(data_5, '~/Dropbox/PhD/Tmem/data/exports/5iGO.xlsx')
